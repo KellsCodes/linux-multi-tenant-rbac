@@ -45,10 +45,14 @@ main() {
 		log_info "Provisioning resources for team: $team_name"
 		# Check if team(group) already exists
 		if grep -q "^$team_name:" /etc/group; then
+			sleep 0.5
+			log_info "Checking if Team $team_name already exists..."
+			sleep 0.5
 			log_info "Team $team_name already exists. Skipping it..."
 			continue
 		else
 			log_info "Creating team $team_name."
+			sleep 0.5
 			path="/data/teams/$team_name"
 			# Create the group and the root directory for the group
 			groupadd "$team_name"
@@ -57,6 +61,7 @@ main() {
 			chown root:"$team_name" "$path"
 			# Set GroupID Bit for collaborative directory
 			chmod 2770 "$path"
+			sleep 0.5
 			log_info "Team $team_name has been provisioned successfully."
 		fi
 	done
