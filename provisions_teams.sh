@@ -13,6 +13,7 @@ IFS=$'\n\t'
 
 # GLOBAL CONSTANTS & ENVIRONMENT SETTINGS
 readonly LOG_FILE="/var/log/provisions_teams/provisions_teams.log"
+readonly GROUPNAME_REGEX='^[a-zA-Z_][a-zA-Z0-9_-]{0,31}$'
 CLEANUP_MODE=false
 
 # HELPER FUNCTIONS (Logging, Notification, Diagnostics)
@@ -43,7 +44,6 @@ while [ "$#" -gt 0 ]; do
 	esac
 done
 
-# Interactive prompt to user
 # Interactive prompt to user
 confirm_action() {
 	while true; do
@@ -112,7 +112,7 @@ fi
 main() {
 	# Check for administrative access first
 	if [ "$EUID" -ne 0 ]; then
-		echo "Error: This script must be run as root or with sudo."
+		log_error "Error: This script must be run as root or with sudo."
 		exit 3
 	fi
 
@@ -136,6 +136,10 @@ main() {
 			log_info "Checking if Team $team_name already exists..."
 			sleep 0.5
 			log_info "Team $team_name already exists. Skipping it..."
+			continue
+		elif [ ! "$team_name" =~ GROUPNAME_REGEX ]; then
+			log_error "$team_name contains forbidden characters or is too long."
+			sleep 0.5
 			continue
 		else
 			log_info "Creating team $team_name."
