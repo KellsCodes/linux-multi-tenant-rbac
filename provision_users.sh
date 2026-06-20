@@ -80,14 +80,25 @@ main() {
 		exit 2
 	fi
 
-	local username="${FLAG#*=}"
+	if [[ -z "$FLAG" ]]; then
+		log_error "USAGE: $SCRIPT_NAME <username> [username_2 ...] --group=<group_name>"
+		echo ""
+		log_error "USAGE: $SCRIPT_NAME --delete=<username>"
+		echo ""
+		log_error "USAGE: $SCRIPT_NAME --modify=<username> name=<new_username> group=<new_group> drop=<old_group>"
+		echo ""
+		log_info "Use one or more options for running the script."
+		exit 3;
+	fi
+
 	# Delete user
 	if [[ "$DELETE_USER_MODE" == "true"  ]]; then
 		confirm_action
 
+		local username="${FLAG#*=}"
 		if [[ ! "$username" =~ $USERNAME_REGEX ]]; then
 			log_error "Invalid linux username."
-			exit 3
+			exit 4
 		fi 
 		if grep -q "^$username:" /etc/passwd; then
 			killall -u "$username" 2>/dev/null || true
@@ -100,16 +111,74 @@ main() {
 			else
 				log_error "Failed to remove user: $username"
 				sleep 1
-				exit 4
+				exit 5
 			fi
 		else 
 			log_error "User $username does not exist."
 			sleep 1
-			exit 5
+			exit 6
+		fi
+	fi
+	
+	# Create new user or add user to group if user exists
+	if [[ "$CREATE_USER_MODE" == "true" ]]; then
+		local group_name="${FLAG#*=}"
+		if [[ ! "$group_name" =~ $GROUPNAME_REGEX ]]; then
+			log_error "Invalid linux server groupname convention."
+			sleep 1
+			exit 6
 		fi
 
-		
+		local USER_LIST=()
+		# get usernames from args
+		for username in "$@"; do
+			if [[ "$username" == --* ]]; then
+				continue
+			fi
+
+			if [[ ! "$username" =~ $USERNAME_REGEX ]]; then
+				log_error "Invalid linux server username convention: '$username'"
+				sleep 1
+				exit 7
+			elif [[ "$username" =~ "$FLAG" ]]; then
+				continue
+			elif grep -q "$username" /etc/passwd; then
+				log_info "User already exists, moving to the next user"
+				sleep 1
+				continue
+			else
+				
+				# check if group exists, create group if missing group
+				if ! grep -q "^$group_name:" /etc/group; then
+					log_info "Group '$group_name' not found. Provisioning group via teams script..."
+					sleep 1
+					SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+					if "$SCRIPT_DIR/provisions_teams.sh" "$group_name"; then
+						log_info "Successfully created group: $group_name"
+						sleep 1
+					else
+						log_error "Failed to execute provisions_teams.sh for group: $group_name"
+						sleep 1
+						exit 8
+					fi
+				fi
+				# create user and add user to group
+				if useradd -m -g "$group_name" "$username"; then
+					log_info "Successfully added user '$username' to group '$group_name'"
+					sleep 1
+				else
+					log_error "Failed to create user: $username"
+					sleep 1
+					exit 9
+				fi
+
+			fi
+		done
 	fi
+	
+
+		
 }
 
 main "$@"
