@@ -30,6 +30,23 @@ log_error() {
     echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] [ERROR] - $*" | tee -a "$LOG_FILE" >&2
 }
 
+create_group() {
+	log_info "Group '$1' not found. Provisioning group via teams script..."
+	sleep 1
+	SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+	if "$SCRIPT_DIR/provisions_teams.sh" "$1"; then
+		log_info "Successfully created group: $1"
+		sleep 1
+	else
+		log_error "Failed to execute provisions_teams.sh for group: $1"
+		sleep 1
+		log_error "Exiting the program..."
+		sleep 1
+		exit 8
+	fi
+}
+
 # check user input for multiple flags
 for args in "$@"; do
 	# Check the flags
@@ -140,6 +157,7 @@ main() {
 				log_error "Invalid linux server username convention: '$username'"
 				sleep 1
 				exit 7
+				# check if username valriable is the actual FLAG on the loop
 			elif [[ "$username" =~ "$FLAG" ]]; then
 				continue
 			elif grep -q "$username" /etc/passwd; then
@@ -150,21 +168,11 @@ main() {
 				
 				# check if group exists, create group if missing group
 				if ! grep -q "^$group_name:" /etc/group; then
-					log_info "Group '$group_name' not found. Provisioning group via teams script..."
-					sleep 1
-					SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-					if "$SCRIPT_DIR/provisions_teams.sh" "$group_name"; then
-						log_info "Successfully created group: $group_name"
-						sleep 1
-					else
-						log_error "Failed to execute provisions_teams.sh for group: $group_name"
-						sleep 1
-						exit 8
-					fi
+					create_group "$group_name"
 				fi
 				# create user and add user to group
-				if useradd -m -g "$group_name" "$username"; then
+				if useradd -m -g "$group_name" -s /bin/bash "$username"; then
+					usermod -aG "$group_name" "$username"
 					log_info "Successfully added user '$username' to group '$group_name'"
 					sleep 1
 				else
@@ -175,6 +183,110 @@ main() {
 
 			fi
 		done
+	fi
+
+	# Modify users(change or append groups, change )
+	if [[ "$MODIFY_USER_MODE" == "true" ]]; then
+		if [[ ! "$1" =~ "$FLAG" ]]; then
+			log_error "USAGE: $SCRIPT_NAME --modify=<username> name=<new_username> group=<new_group> drop=<old_group>"
+			sleep 1
+			log_error "Script arguments are not well structured."
+			exit 10
+		fi
+		local username="${FLAG#*=}"
+		log_info "confirming $username is on this server..."
+		sleep 1
+		# Check if user is present on the server
+		if ! grep -q "^$username" /etc/passwd; then
+			log_error "$username, not found on this server!"
+			sleep 1
+			exit 11
+		else
+			local name=''
+			local group=''
+			local is_valid="false"
+			for key in "${@:2}"; do
+				if [[ "$key" =~ ^name= ]]; then
+					if [[ ! "${key#*=}" =~ $USERNAME_REGEX ]]; then
+						log_error "Invalid username format: '${key#*=}'"
+						sleep 1
+						exit 12
+					else
+						name="${key#*=}"
+					fi
+				fi
+
+				# Check if group is available to add user to new group
+				if [[ "$key" =~ ^group= ]]; then
+					group="${key#*=}"
+					# check if group exists, create group if missing group
+					if [[ "${key#*=}" =~ $GROUPNAME_REGEX ]]; then
+						if ! grep -q "^$group:" /etc/group; then
+							create_group "$group"
+						fi
+					else
+						log_error "Invalid group name format: $group"
+						sleep 1
+						exit 13
+					fi
+				fi
+
+				# Check if group name to drop is available
+				if [[ "$key" =~ ^drop= ]]; then
+					local drop_group="${key#*=}"
+					if grep -q "^$drop_group:" /etc/group && id -nG "$name" | grep -qw "$drop_group"; then
+						# Remove the user from the current group before appending the new group
+						log_info "Removing '$name' from group '$drop_group'"
+						sleep 1
+					else
+						log_info "User is not a member of this group '$drop_group'"
+						log_info "Continuing the user modification...."
+						sleep 1
+						continue
+					fi
+				fi
+			done
+
+			# modify the name and group
+			if [[ ! -z "$name" && ! -z "$group" ]]; then
+				log_info "Modifying user data..."
+				if usermod -l "$name" -c "$name" -d "/home/$name" -G "$group" -m "$username"; then
+					log_info "username '$username' changed to $name"
+					echo ''
+					log_info "$name added to group '$group'"
+					sleep 1
+					exit 14
+				else
+					log_error "user modification failed"
+					sleep 1
+					exit 15
+				fi
+			elif [[ -z "$name" && ! -z "$group" ]]; then
+				log_info "Modifying user group"
+				sleep 1
+				if usermod -aG "$group" "$username"; then
+					log_info "User '$username' added to the group '$group' successfully."
+					sleep 1
+					exit 16
+				else
+					log_error "Adding user '$username' to group '$group' is unsuccessful"
+					sleep 1
+					exit 17
+				fi
+			elif [[ ! -z "$name" && -z "$group" ]]; then
+				log_info "Modifying user login name"
+				sleep 1
+				if usermod -l "$name" -c "$name" -d "/home/$name" -m "$username"; then
+					log_info "User login name is changed successfully."
+					sleep 1
+					exit 18
+				else
+					log_error "User modification is unsuccessful."
+					sleep 1
+					exit 19
+				fi
+			fi
+		fi
 	fi
 	
 
